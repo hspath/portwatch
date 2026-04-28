@@ -2,32 +2,28 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"time"
+
+	"github.com/user/portwatch/internal/notify"
 )
 
-// Config holds the runtime configuration for portwatch.
+// Config holds all portwatch runtime configuration.
 type Config struct {
-	// BaselineFile is the path to the baseline JSON file.
-	BaselineFile string `json:"baseline_file"`
-
-	// ScanInterval is how often the daemon rescans open ports.
-	ScanInterval Duration `json:"scan_interval"`
-
-	// AlertLogFile is an optional path to write alerts to (empty = stderr).
-	AlertLogFile string `json:"alert_log_file,omitempty"`
-
-	// IgnorePorts is a list of ports to silently ignore during diffing.
-	IgnorePorts []uint16 `json:"ignore_ports,omitempty"`
+	BaselineFile string        `json:"baseline_file"`
+	Interval     Duration      `json:"interval"`
+	IgnorePorts  []int         `json:"ignore_ports"`
+	Notify       notify.Config `json:"notify"`
 }
 
-// Duration is a time.Duration that marshals/unmarshals as a string (e.g. "30s").
+// Duration wraps time.Duration for JSON marshal/unmarshal as a string.
 type Duration struct {
 	time.Duration
 }
 
 func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.Duration.String())
+	return json.Marshal(d.String())
 }
 
 func (d *Duration) UnmarshalJSON(b []byte) error {
@@ -35,11 +31,11 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	parsed, err := time.ParseDuration(s)
+	v, err := time.ParseDuration(s)
 	if err != nil {
 		return err
 	}
-	d.Duration = parsed
+	d.Duration = v
 	return nil
 }
 
@@ -47,35 +43,48 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 func Defaults() Config {
 	return Config{
 		BaselineFile: "baseline.json",
-		ScanInterval: Duration{30 * time.Second},
+		Interval:     Duration{30 * time.Second},
+		IgnorePorts:  []int{},
+		Notify:       notify.Config{Method: notify.MethodStdout},
 	}
 }
 
-// Load reads a JSON config file from path. Missing file returns Defaults.
+// Load reads a Config from path. Returns Defaults if the file does not exist.
 func Load(path string) (Config, error) {
 	cfg := Defaults()
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return cfg, nil
 		}
 		return cfg, err
 	}
-	defer f.Close()
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		return Defaults(), err
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, err
 	}
 	return cfg, nil
 }
 
-// Save writes cfg as indented JSON to path.
+// Save writes cfg as JSON to path, creating or truncating the file.
 func Save(path string, cfg Config) error {
-	f, err := os.Create(path)
+	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(cfg)
+	return os.WriteFile(path, data, 0o644)
+}
+
+// FilterIgnored removes ports listed in cfg.IgnorePorts from ports.
+func FilterIgnored(ports []int, ignored []int) []int {
+	set := make(map[int]struct{}, len(ignored))
+	for _, p := range ignored {
+		set[p] = struct{}{}
+	}
+	out := ports[:0]
+	for _, p := range ports {
+		if _, skip := set[p]; !skip {
+			out = append(out, p)
+		}
+	}
+	return out
 }
