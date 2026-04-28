@@ -2,23 +2,32 @@ package config
 
 import "github.com/user/portwatch/internal/ports"
 
-// FilterIgnored removes any listeners whose port appears in the ignore list.
-// It returns a new slice and does not modify the original.
-func FilterIgnored(listeners []ports.Listener, ignorePorts []uint16) []ports.Listener {
-	if len(ignorePorts) == 0 {
+// IgnoreRule describes a single port+protocol combination to suppress from alerts.
+type IgnoreRule struct {
+	Proto string `json:"proto"` // "tcp" or "udp"
+	Port  uint16 `json:"port"`
+}
+
+// FilterIgnored removes listeners that match any ignore rule in the config.
+func FilterIgnored(listeners []ports.Listener, rules []IgnoreRule) []ports.Listener {
+	if len(rules) == 0 {
 		return listeners
 	}
 
-	ignoreSet := make(map[uint16]struct{}, len(ignorePorts))
-	for _, p := range ignorePorts {
-		ignoreSet[p] = struct{}{}
+	type key struct {
+		proto string
+		port  uint16
+	}
+	ignored := make(map[key]struct{}, len(rules))
+	for _, r := range rules {
+		ignored[key{proto: r.Proto, port: r.Port}] = struct{}{}
 	}
 
-	filtered := make([]ports.Listener, 0, len(listeners))
+	var result []ports.Listener
 	for _, l := range listeners {
-		if _, skip := ignoreSet[l.Port]; !skip {
-			filtered = append(filtered, l)
+		if _, skip := ignored[key{proto: l.Proto, port: l.Port}]; !skip {
+			result = append(result, l)
 		}
 	}
-	return filtered
+	return result
 }
