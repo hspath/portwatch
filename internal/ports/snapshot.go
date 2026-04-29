@@ -1,42 +1,45 @@
 package ports
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
-// Snapshot holds a point-in-time capture of active listeners.
+// Snapshot is an immutable set of listeners captured at one moment.
 type Snapshot struct {
-	CapturedAt time.Time
-	Listeners  []Listener
+	listeners []Listener
+	index     map[string]Listener
 }
 
-// NewSnapshot scans current listeners and returns a Snapshot.
-func NewSnapshot(opts FilterOptions) (*Snapshot, error) {
-	listeners, err := ScanListeners()
-	if err != nil {
-		return nil, fmt.Errorf("snapshot: scan failed: %w", err)
+// NewSnapshot creates a Snapshot from a slice of Listeners.
+func NewSnapshot(ls []Listener) *Snapshot {
+	idx := make(map[string]Listener, len(ls))
+	for _, l := range ls {
+		idx[listenerKey(l)] = l
 	}
-	filtered := ApplyFilter(listeners, opts)
-	return &Snapshot{
-		CapturedAt: time.Now().UTC(),
-		Listeners:  filtered,
-	}, nil
+	out := make([]Listener, len(ls))
+	copy(out, ls)
+	return &Snapshot{listeners: out, index: idx}
 }
 
-// Summary returns a human-readable one-line description of the snapshot.
+// Listeners returns a copy of all listeners in the snapshot.
+func (s *Snapshot) Listeners() []Listener {
+	out := make([]Listener, len(s.listeners))
+	copy(out, s.listeners)
+	return out
+}
+
+// Contains reports whether l is present in the snapshot.
+func (s *Snapshot) Contains(l Listener) bool {
+	_, ok := s.index[listenerKey(l)]
+	return ok
+}
+
+// Len returns the number of listeners.
+func (s *Snapshot) Len() int { return len(s.listeners) }
+
+// Summary returns a human-readable one-liner.
 func (s *Snapshot) Summary() string {
-	return fmt.Sprintf("snapshot at %s: %d listener(s)",
-		s.CapturedAt.Format(time.RFC3339), len(s.Listeners))
+	return fmt.Sprintf("snapshot: %d listener(s)", len(s.listeners))
 }
 
-// Contains reports whether the snapshot includes a listener matching
-// the given protocol, address, and port.
-func (s *Snapshot) Contains(proto, addr string, port uint16) bool {
-	for _, l := range s.Listeners {
-		if l.Proto == proto && l.Addr == addr && l.Port == port {
-			return true
-		}
-	}
-	return false
+func listenerKey(l Listener) string {
+	return fmt.Sprintf("%s|%s|%d", l.Proto, l.IP, l.Port)
 }

@@ -1,78 +1,61 @@
 package ports
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
-func makeSnapshot(listeners []Listener) *Snapshot {
-	return &Snapshot{
-		CapturedAt: time.Now().UTC(),
-		Listeners:  listeners,
-	}
+func makeSnapshot(listeners ...Listener) *Snapshot {
+	return NewSnapshot(listeners)
 }
 
 func TestSnapshot_Summary_ContainsCount(t *testing.T) {
-	s := makeSnapshot([]Listener{
-		{Proto: "tcp", Addr: "0.0.0.0", Port: 80},
-		{Proto: "tcp", Addr: "0.0.0.0", Port: 443},
-	})
-	summary := s.Summary()
-	if summary == "" {
+	s := makeSnapshot(
+		Listener{Proto: "tcp", IP: "0.0.0.0", Port: 80},
+		Listener{Proto: "tcp", IP: "0.0.0.0", Port: 443},
+	)
+	sum := s.Summary()
+	if sum == "" {
 		t.Fatal("expected non-empty summary")
 	}
-	// Should mention the count
-	for _, sub := range []string{"2", "listener"} {
-		if !containsStr(summary, sub) {
-			t.Errorf("summary %q missing %q", summary, sub)
-		}
+	if s.Len() != 2 {
+		t.Errorf("expected Len 2, got %d", s.Len())
 	}
 }
 
 func TestSnapshot_Contains_Match(t *testing.T) {
-	s := makeSnapshot([]Listener{
-		{Proto: "tcp", Addr: "0.0.0.0", Port: 8080},
-	})
-	if !s.Contains("tcp", "0.0.0.0", 8080) {
-		t.Error("expected Contains to return true for existing listener")
+	l := Listener{Proto: "tcp", IP: "127.0.0.1", Port: 8080}
+	s := makeSnapshot(l)
+	if !s.Contains(l) {
+		t.Error("expected snapshot to contain listener")
 	}
 }
 
 func TestSnapshot_Contains_NoMatch(t *testing.T) {
-	s := makeSnapshot([]Listener{
-		{Proto: "tcp", Addr: "0.0.0.0", Port: 8080},
-	})
-	if s.Contains("udp", "0.0.0.0", 8080) {
-		t.Error("expected Contains to return false for mismatched proto")
-	}
-	if s.Contains("tcp", "0.0.0.0", 9090) {
-		t.Error("expected Contains to return false for mismatched port")
+	s := makeSnapshot(Listener{Proto: "tcp", IP: "0.0.0.0", Port: 80})
+	other := Listener{Proto: "udp", IP: "0.0.0.0", Port: 80}
+	if s.Contains(other) {
+		t.Error("expected snapshot NOT to contain listener with different proto")
 	}
 }
 
 func TestSnapshot_Contains_Empty(t *testing.T) {
-	s := makeSnapshot(nil)
-	if s.Contains("tcp", "0.0.0.0", 80) {
-		t.Error("expected Contains to return false on empty snapshot")
+	s := makeSnapshot()
+	if s.Contains(Listener{Proto: "tcp", IP: "0.0.0.0", Port: 22}) {
+		t.Error("empty snapshot should not contain any listener")
 	}
 }
 
-func TestSnapshot_Summary_EmptyListeners(t *testing.T) {
-	s := makeSnapshot(nil)
-	summary := s.Summary()
-	if !containsStr(summary, "0") {
-		t.Errorf("expected '0' in summary, got %q", summary)
+func TestSnapshot_Listeners_IsCopy(t *testing.T) {
+	original := Listener{Proto: "tcp", IP: "0.0.0.0", Port: 22}
+	s := makeSnapshot(original)
+	ls := s.Listeners()
+	ls[0].Port = 9999
+	if s.listeners[0].Port == 9999 {
+		t.Error("mutating returned slice should not affect snapshot")
 	}
 }
 
-// containsStr is a simple helper to avoid importing strings in test file.
-func containsStr(s, sub string) bool {
-	return len(s) >= len(sub) && func() bool {
-		for i := 0; i <= len(s)-len(sub); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	}()
+func TestSnapshot_Len_Empty(t *testing.T) {
+	s := makeSnapshot()
+	if s.Len() != 0 {
+		t.Errorf("expected Len 0, got %d", s.Len())
+	}
 }

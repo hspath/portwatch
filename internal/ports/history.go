@@ -1,64 +1,71 @@
 package ports
 
 import (
-	"fmt"
 	"sync"
+	"time"
 )
 
-// History keeps an ordered ring of recent Snapshots for trend analysis.
+// HistoryEntry records a snapshot at a point in time.
+type HistoryEntry struct {
+	Timestamp time.Time
+	Snapshot  *Snapshot
+}
+
+// History maintains a rolling window of snapshots.
 type History struct {
-	mu       sync.Mutex
-	max      int
-	snapshots []*Snapshot
+	mu      sync.RWMutex
+	entries []HistoryEntry
+	maxSize int
 }
 
-// NewHistory creates a History that retains at most maxEntries snapshots.
-func NewHistory(maxEntries int) *History {
-	if maxEntries < 1 {
-		maxEntries = 1
+// NewHistory creates a History that retains at most maxSize entries.
+func NewHistory(maxSize int) *History {
+	if maxSize <= 0 {
+		maxSize = 10
 	}
-	return &History{max: maxEntries}
+	return &History{maxSize: maxSize}
 }
 
-// Add appends a snapshot, evicting the oldest if the buffer is full.
-func (h *History) Add(s *Snapshot) {
+// Push appends a new snapshot, evicting the oldest if at capacity.
+func (h *History) Push(s *Snapshot) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.snapshots) >= h.max {
-		h.snapshots = h.snapshots[1:]
+	entry := HistoryEntry{Timestamp: time.Now(), Snapshot: s}
+	if len(h.entries) >= h.maxSize {
+		h.entries = h.entries[1:]
 	}
-	h.snapshots = append(h.snapshots, s)
+	h.entries = append(h.entries, entry)
 }
 
-// Latest returns the most recently added snapshot, or nil if empty.
-func (h *History) Latest() *Snapshot {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if len(h.snapshots) == 0 {
-		return nil
-	}
-	return h.snapshots[len(h.snapshots)-1]
-}
-
-// Len returns the number of snapshots currently stored.
+// Len returns the number of stored entries.
 func (h *History) Len() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.snapshots)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.entries)
 }
 
-// All returns a copy of all stored snapshots in chronological order.
-func (h *History) All() []*Snapshot {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make([]*Snapshot, len(h.snapshots))
-	copy(out, h.snapshots)
+// Latest returns the most recent entry, and false if empty.
+func (h *History) Latest() (HistoryEntry, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if len(h.entries) == 0 {
+		return HistoryEntry{}, false
+	}
+	return h.entries[len(h.entries)-1], true
+}
+
+// All returns a copy of all stored entries, oldest first.
+func (h *History) All() []HistoryEntry {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]HistoryEntry, len(h.entries))
+	copy(out, h.entries)
 	return out
 }
 
-// String returns a brief description of the history buffer state.
-func (h *History) String() string {
+// Clear removes all entries.
+func (h *History) Clear() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return fmt.Sprintf("history: %d/%d snapshots", len(h.snapshots), h.max)
+	h.entries = nil
 }
