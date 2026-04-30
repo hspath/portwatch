@@ -40,6 +40,23 @@ func (s *Snapshot) Summary() string {
 	return fmt.Sprintf("snapshot: %d listener(s)", len(s.listeners))
 }
 
+// Diff returns the listeners added and removed between s and a newer snapshot.
+// added contains listeners present in next but not in s.
+// removed contains listeners present in s but not in next.
+func (s *Snapshot) Diff(next *Snapshot) (added, removed []Listener) {
+	for _, l := range next.listeners {
+		if !s.Contains(l) {
+			added = append(added, l)
+		}
+	}
+	for _, l := range s.listeners {
+		if !next.Contains(l) {
+			removed = append(removed, l)
+		}
+	}
+	return added, removed
+}
+
 func listenerKey(l Listener) string {
 	return fmt.Sprintf("%s|%s|%d", l.Proto, l.IP, l.Port)
 }
